@@ -1,0 +1,63 @@
+#version 440 core
+
+precision highp float;
+
+layout (quads, equal_spacing, ccw) in;
+
+in vec3 vertex_position_es[];
+in vec3 vertex_normal_es[];
+in vec3 vertex_tangent_es[];
+in vec3 vertex_uv_es[];
+
+out vec3 vertex_worldposition_fs;
+out vec3 vertex_worldnormal_fs;
+out vec3 vertex_worldtangent_fs;
+out vec3 vertex_uv_fs;
+
+layout (location = 1) uniform mat4 projview_mat;
+layout (location = 2) uniform mat4 world_transform_mat;
+layout (location = 4) uniform vec2 lonlat;
+
+layout (binding = 0) uniform sampler2D srtm_tex;
+
+vec3 interpolateBilinear3D(vec3 v11, vec3 v12, vec3 v22, vec3 v21) {
+    vec3 vx1 = (1 - gl_TessCoord.x) * v11 + gl_TessCoord.x * v12;
+    vec3 vx2 = (1 - gl_TessCoord.x) * v21 + gl_TessCoord.x * v22;
+    return (1 - gl_TessCoord.y) * vx1 + gl_TessCoord.y * vx2;
+} 
+
+//Detailed explanation in geomapmesh.tessctl
+vec3 mapPlaneToGeoSphere(vec2 plane_point, vec2 lonlat) {
+    float lon = radians(lonlat.x) - radians(0.5) * plane_point.y;
+    float lat = radians(lonlat.y) + radians(0.5) * plane_point.x;
+    float latr = sin(lon);
+    return vec3(latr * sin(lat), cos(lon), latr * cos(lat));
+}
+
+void main() {
+    vec3 vertex_position_itp = interpolateBilinear3D(vertex_position_es[0], vertex_position_es[1], vertex_position_es[2], vertex_position_es[3]);
+    vec3 vertex_normal_itp = interpolateBilinear3D(vertex_normal_es[0], vertex_normal_es[1], vertex_normal_es[2], vertex_normal_es[3]);
+    vec3 vertex_uv_itp = interpolateBilinear3D(vertex_uv_es[0], vertex_uv_es[1], vertex_uv_es[2], vertex_uv_es[3]);
+    vec3 vertex_tangent_itp = interpolateBilinear3D(vertex_tangent_es[0], vertex_tangent_es[1], vertex_tangent_es[2], vertex_tangent_es[3]);
+    //Map subdivided plane to geosphere
+    vec3 posmapped = mapPlaneToGeoSphere(vertex_position_itp.xy, lonlat);
+    vec3 vertex_worldposition = (world_transform_mat * vec4(posmapped, 1.0)).xyz;
+    //vec3 vertex_worldposition = (world_transform_mat * vec4(vertex_position_itp, 1.0)).xyz;
+    vec3 vertex_worldnormal = normalize(vertex_worldposition - (world_transform_mat * vec4(0.0, 0.0, 0.0, 1.0)).xyz); //Right after mapping the normal should be equal to position - it's a sphere!
+    vec3 tanmapped = mapPlaneToGeoSphere(vertex_position_itp.xy + 30 * vertex_tangent_itp.xy, lonlat) - posmapped; //This is only to find out the orientation of the vector relative to position. A 30 * multiplier is used to provide better accuracy when the vector is orthonormalized with position vector
+    vec3 tanortho = normalize(tanmapped - dot(tanmapped, posmapped) * posmapped); //Gram-Schmidtt
+    vertex_worldtangent_fs = normalize((world_transform_mat * vec4(tanortho, 1.0)).xyz - (world_transform_mat * vec4(0.0, 0.0, 0.0, 1.0)).xyz);
+    //I could try adjusting normals by sampling adjacent texture samples, but it's not very important now and
+    //not very performant. A better solution would be to generate a normal map and use it in fragment shader.
+    //It should provide higher quality lightning as well as better performance.
+    float displacement = texture(srtm_tex, vertex_uv_itp.xy).r;
+    //Trash
+    float b = 0.0;
+    if ((vertex_worldnormal * displacement).y < 0) {
+        b = -100;
+    }
+    vertex_worldposition_fs = vertex_worldposition + (vertex_worldnormal * displacement) * 0.01;
+    vertex_worldnormal_fs = vertex_worldnormal;
+    vertex_uv_fs = vertex_uv_itp;
+    gl_Position = projview_mat * vec4(vertex_worldposition_fs, 1.0);
+}

@@ -1,0 +1,92 @@
+#version 440 core
+
+precision highp float;
+
+layout (vertices = 4) out;
+
+in vec3 vertex_position_tc[];
+in vec3 vertex_normal_tc[];
+in vec3 vertex_tangent_tc[];
+in vec3 vertex_uv_tc[];
+
+out vec3 vertex_position_es[];
+out vec3 vertex_normal_es[];
+out vec3 vertex_tangent_es[];
+out vec3 vertex_uv_es[];
+
+layout (location = 2) uniform mat4 world_transform_mat;
+//layout (location = 3) uniform float zoom_level;     //Should be replace by camera_pos
+layout (location = 4) uniform vec2 lonlat;          //Longitude and latitude of the CENTER of tile
+layout (location = 5) uniform vec3 camera_position; //Self-explanatory
+layout (location = 8) uniform float lod_factor;
+
+#define LOD_NONE      -1
+#define LOD_POOR       1
+#define LOD_VERY_LOW   2
+#define LOD_LOW        4
+#define LOD_NORMAL     8
+#define LOD_GOOD       16
+#define LOD_VERY_GOOD  32
+#define LOD_HYPER      64
+#define LOD_ANOTHER    82 //Might cap to 64 on implementations which support only minimal tesselation level
+
+#define LODDIST_POOR       1.28
+#define LODDIST_VERY_LOW   0.64
+#define LODDIST_LOW        0.32
+#define LODDIST_NORMAL     0.16
+#define LODDIST_GOOD       0.08
+#define LODDIST_VERY_GOOD  0.04
+#define LODDIST_HYPER      0.02
+#define LODDIST_ANOTHER    0.01
+
+//Maps a 2D plane to 3D geosphere.
+//A standard 2D plane with OpenGL coordinates will convey a 1x1 degree tile in geospere
+//with (0,0) at the center of the tile - the position on the surface of
+//geosphere specified by lonlat vector
+//The position of the geosphere is (0, 0, 0) and the radius is 1.
+//Note that longitude and latitude specified in lonlat
+//needs to be given in degrees with 0 LON being the north pole
+//and 180 LON the south pole
+vec3 mapPlaneToGeoSphere(vec2 plane_point, vec2 lonlat) {
+    float lon = radians(lonlat.x) - radians(0.5) * plane_point.y;
+    float lat = radians(lonlat.y) + radians(0.5) * plane_point.x;
+    float latr = sin(lon);
+    return vec3(latr * sin(lat), cos(lon), latr * cos(lat));
+}
+
+//Get tesselation level for tile (based on distance from camera
+//The world position of the untransformed sphere is assumed to be (0, 0, 0) and the
+//radius to be 1.
+uint getTessLevel(vec3 camera_pos, vec3 tile_pos) {
+    float camdist = distance(camera_pos, tile_pos);
+    return uint(floor(clamp(64.0 * (1.0 / ((camdist * 1000.0 + 1.0) * 0.5)) * lod_factor, 1, 82))); //Might cap to 64 on implementations which support only minimal tesselation level
+}
+
+vec3 subTilePos(vec2 tile_adjust) {
+    float ctx = (vertex_position_tc[0].x + vertex_position_tc[1].x + vertex_position_tc[0].x + vertex_position_tc[0].x) / 4.0;
+    float cty = (vertex_position_tc[0].y + vertex_position_tc[1].y + vertex_position_tc[0].y + vertex_position_tc[0].y) / 4.0;
+    vec2 ctr = vec2(ctx, cty) + tile_adjust;
+    return (world_transform_mat * vec4(mapPlaneToGeoSphere(ctr, lonlat), 1.0)).xyz;
+}
+
+void main() {
+    //Pass-thru vertices
+    vertex_position_es[gl_InvocationID] = vertex_position_tc[gl_InvocationID];
+    vertex_normal_es[gl_InvocationID] = vertex_normal_tc[gl_InvocationID];
+    vertex_tangent_es[gl_InvocationID] = vertex_tangent_tc[gl_InvocationID];
+    vertex_uv_es[gl_InvocationID] = vertex_uv_tc[gl_InvocationID];
+    //Left (west) edge and bottom (south) edge always subdivide to match tesselation
+    //levels of wetern and southern tiles, wile right (east) and top (north) edges
+    //remain at inner tesselation level
+    //This provides a seamless LOD transitions
+    vec3 tile_pos = subTilePos(vec2(0.0, 0.0));
+    vec3 ltile_pos = subTilePos(vec2(-1.0/9.0, 0.0));
+    vec3 btile_pos = subTilePos(vec2(0.0, -1.0/9.0));
+    uint inner_tess_lvl =  getTessLevel(camera_position, tile_pos);
+    gl_TessLevelOuter[0] = getTessLevel(camera_position, ltile_pos); //Left edge
+    gl_TessLevelOuter[1] = getTessLevel(camera_position, btile_pos);  //Bottom edge
+    gl_TessLevelOuter[2] = inner_tess_lvl;
+    gl_TessLevelOuter[3] = inner_tess_lvl;
+    gl_TessLevelInner[0] = inner_tess_lvl;
+    gl_TessLevelInner[1] = inner_tess_lvl;
+}

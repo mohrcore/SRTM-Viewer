@@ -1,0 +1,29 @@
+#version 440 core
+
+layout (vertices = 4) out;
+
+in vec3 vertex_worldposition_tc[];
+in vec3 vertex_worldnormal_tc[];
+in vec3 vertex_uv_tc[];
+
+out vec3 vertex_worldposition_es[];
+out vec3 vertex_worldnormal_es[];
+out vec3 vertex_uv_es[];
+
+layout (location = 3) uniform float zoom_level;
+
+uint getTessLevel() {
+    return uint(floor(clamp(zoom_level, 1.0, 20.0) * (64.0 / 20.0)));
+}
+
+void main() {
+    vertex_worldposition_es[gl_InvocationID] = vertex_worldposition_tc[gl_InvocationID];
+    vertex_worldnormal_es[gl_InvocationID] = vertex_worldnormal_tc[gl_InvocationID];
+    vertex_uv_es[gl_InvocationID] = vertex_uv_tc[gl_InvocationID];
+    gl_TessLevelOuter[0] = getTessLevel();
+    gl_TessLevelOuter[1] = getTessLevel();
+    gl_TessLevelOuter[2] = getTessLevel();
+    gl_TessLevelOuter[3] = getTessLevel();
+    gl_TessLevelInner[0] = getTessLevel();
+    gl_TessLevelInner[1] = getTessLevel();
+}

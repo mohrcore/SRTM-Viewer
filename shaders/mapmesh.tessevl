@@ -1,0 +1,39 @@
+#version 440 core
+
+layout (quads, equal_spacing, ccw) in;
+
+in vec3 vertex_worldposition_es[];
+in vec3 vertex_worldnormal_es[];
+in vec3 vertex_uv_es[];
+
+out vec3 vertex_worldposition_fs;
+out vec3 vertex_worldnormal_fs;
+out vec3 vertex_worldtangent_fs;
+out vec3 vertex_uv_fs;
+
+layout (location = 1) uniform mat4 projview_mat;
+//layout (location = 2) uniform mat4 world_transform_mat;
+
+layout (binding = 0) uniform sampler2D srtm_tex;
+
+vec3 interpolateBilinear3D(vec3 v11, vec3 v12, vec3 v22, vec3 v21) {
+    vec3 vx1 = (1 - gl_TessCoord.x) * v11 + gl_TessCoord.x * v12;
+    vec3 vx2 = (1 - gl_TessCoord.x) * v21 + gl_TessCoord.x * v22;
+    return (1 - gl_TessCoord.y) * vx1 + gl_TessCoord.y * vx2;
+} 
+
+void main() {
+    vec3 vertex_worldposition_itp = interpolateBilinear3D(vertex_worldposition_es[0], vertex_worldposition_es[1], vertex_worldposition_es[2], vertex_worldposition_es[3]);
+    vec3 vertex_worldnormal_itp = interpolateBilinear3D(vertex_worldnormal_es[0], vertex_worldnormal_es[1], vertex_worldnormal_es[2], vertex_worldnormal_es[3]);
+    vec3 vertex_uv_itp = interpolateBilinear3D(vertex_uv_es[0], vertex_uv_es[1], vertex_uv_es[2], vertex_uv_es[3]);
+
+    float displacement = texture(srtm_tex, vertex_uv_itp.xy).r;
+    float b = 0.0;
+    if ((vertex_worldnormal_itp * displacement).y < 0) {
+        b = -100;
+    }
+    vertex_worldposition_fs = vertex_worldposition_itp + (vertex_worldnormal_itp * displacement) * 10.0;
+    vertex_worldnormal_fs = vertex_worldnormal_itp;
+    vertex_uv_fs = vertex_uv_itp;
+    gl_Position = projview_mat * vec4(vertex_worldposition_fs, 1.0);
+}
